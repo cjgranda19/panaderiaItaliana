@@ -1,0 +1,56 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [ "CI" ]
+    types: [ "completed" ]
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ===== FRONTEND → Vercel =====
+      # Requiere secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+      - name: Install Vercel CLI
+        run: npm i -g vercel
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy frontend to Vercel (prod)
+        working-directory: frontend
+        run: |
+          vercel deploy --prebuilt --prod \
+            --token "${{ secrets.VERCEL_TOKEN }}" \
+            --yes
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # ===== BACKEND → Render (ejemplo trigger) =====
+      # Secret: RENDER_DEPLOY_HOOK (deploy hook URL)
+      - name: Trigger Render backend deploy
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+      - name: Post URLs as job summary
+        run: |
+          echo "### URLs de despliegue" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend (Vercel): ${{ secrets.FRONTEND_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend (Render):  ${{ secrets.BACKEND_URL }}"  >> $GITHUB_STEP_SUMMARY

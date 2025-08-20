@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # --- Job: Unit tests & coverage (frontend + backend) ---
+  test-and-coverage:
+    name: Unit tests & coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # ===== BACKEND =====
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+
+      - name: Test backend (CI + coverage)
+        working-directory: backend
+        run: npm test -- --ci --coverage
+
+      - name: Save backend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage
+          if-no-files-found: error
+          retention-days: 7
+
+      # ===== FRONTEND =====
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test frontend (CI + coverage)
+        working-directory: frontend
+        run: npm test -- --ci --coverage
+
+      - name: Save frontend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          if-no-files-found: error
+          retention-days: 7
+
+  # --- Job: k6 performance (condicional) ---
+  performance:
+    name: k6 performance
+    needs: [test-and-coverage]
+    runs-on: ubuntu-latest
+    if: >
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'pull_request' &&
+       contains(toJson(github.event.pull_request.labels), 'perf'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node (para generar data si necesitas)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Create reports folder
+        run: mkdir -p tests/k6/reports
+
+      # Puedes correr los 3 escenarios; si falla cualquiera (thresholds), falla el job.
+      - name: Run k6 ramp/load
+        run: k6 run tests/k6/ramp.js
+
+      - name: Run k6 spike
+        run: k6 run tests/k6/spike.js
+
+      - name: Run k6 soak
+        run: k6 run tests/k6/soak.js
+
+      - name: Upload k6 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-reports
+          path: tests/k6/reports
+          if-no-files-found: error
+          retention-days: 7
