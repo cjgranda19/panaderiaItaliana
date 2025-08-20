@@ -26,6 +26,17 @@ app.get('/', (req, res) => {
   res.send('✅ Servidor funcionando en el puerto ' + PORT); 
 });
 
+// Health check
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    port: process.env.PORT,
+    uptime: process.uptime(),
+    date: new Date()
+  });
+});
+
+
 // Sanity‐check ping
 app.post('/ping', (req, res) => {
   console.log('🔖 [ping] body:', req.body);
