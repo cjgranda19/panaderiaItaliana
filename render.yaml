@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: panaderialtaliana
+    env: node
+    rootDir: backend-panaderia
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: true
+    plan: free

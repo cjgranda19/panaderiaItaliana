@@ -2,16 +2,16 @@ name: CD
 
 on:
   workflow_run:
-    workflows: [ "CI" ]
+    workflows: [ "CI" ]              # Debe coincidir con el nombre de tu workflow de CI
     types: [ "completed" ]
     branches: [ "main" ]
 
 jobs:
   deploy:
-    name: Deploy
+    name: Deploy (Firebase + Render)
     runs-on: ubuntu-latest
-    if: >
-      github.event.workflow_run.conclusion == 'success'
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,36 +21,47 @@ jobs:
         with:
           node-version: 20
 
-      # ===== FRONTEND → Vercel =====
-      # Requiere secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
-      - name: Install Vercel CLI
-        run: npm i -g vercel
+      # ===== FRONTEND → Firebase Hosting =====
+      - name: Install deps (frontend)
+        working-directory: frontend
+        run: npm ci
 
-      - name: Build frontend
+      # (Opcional) Inyectar VITE_API_URL en build usando el secret BACKEND_URL
+      - name: Create .env.production (Vite)
         working-directory: frontend
         run: |
-          npm ci
-          npm run build
+          echo "VITE_API_URL=${{ secrets.BACKEND_URL }}" > .env.production
 
-      - name: Deploy frontend to Vercel (prod)
+      - name: Build frontend (Vite)
         working-directory: frontend
-        run: |
-          vercel deploy --prebuilt --prod \
-            --token "${{ secrets.VERCEL_TOKEN }}" \
-            --yes
+        run: npm run build
+
+      - name: Install Firebase CLI
+        run: npm i -g firebase-tools
+
+      - name: Deploy to Firebase Hosting (prod)
+        working-directory: frontend
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      # ===== BACKEND → Render (ejemplo trigger) =====
-      # Secret: RENDER_DEPLOY_HOOK (deploy hook URL)
-      - name: Trigger Render backend deploy
-        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          if [ -f ../.firebaserc ]; then
+            sed -i "s/FIREBASE_PROJECT_ID_AQUI/${FIREBASE_PROJECT_ID}/g" ../.firebaserc || true
+          fi
+          firebase deploy --only hosting --project "$FIREBASE_PROJECT_ID"
 
-      - name: Post URLs as job summary
+      # ===== BACKEND → Render (Deploy Hook) =====
+      - name: Trigger Render backend deploy
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "No RENDER_DEPLOY_HOOK secret set"; exit 1;
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+
+      - name: Post URLs summary
         run: |
           echo "### URLs de despliegue" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend (Vercel): ${{ secrets.FRONTEND_URL }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Backend (Render):  ${{ secrets.BACKEND_URL }}"  >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: ${{ secrets.FRONTEND_URL || 'Configura FRONTEND_URL si quieres mostrarla aquí' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend:  ${{ secrets.BACKEND_URL  || 'Configura BACKEND_URL si quieres mostrarla aquí' }}" >> $GITHUB_STEP_SUMMARY
